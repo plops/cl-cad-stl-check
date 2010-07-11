@@ -222,7 +222,6 @@
 	 (vertex-v p))))
 
 (defun draw-shadow ()
-  (enable :depth-test)
   (loop for face across *faces* and k from 0 do
        (with-primitive :triangles
 	 (when (aref *visibility* k)
@@ -352,8 +351,8 @@
   (load-identity)
   #+nil (ortho 0 (width w) (height w) 0 -1 1)
   (glu:perspective 70 (/ (width w) (height w)) .01 100)
-  (glu:look-at 2 3 4
-               0 0 -2
+  (glu:look-at 2 3 1
+               0 0 0
                0 0 1)
   (matrix-mode :modelview)
   (load-identity))
@@ -395,7 +394,6 @@
        (rotate (* (/ 180d0 pi) phi) 0 0 1)
        (rotate (* (/ 180d0 pi) theta) 0 1 0)
        (scale radius radius 1))
-     (color 1 1 1)
      (with-primitive :triangle-fan
        (normal-v normal)
        (draw-circle))
@@ -403,25 +401,32 @@
 
 (defparameter rot 0)
 (defun draw (mx my mz)
+  (clear-color .1 1 .5d0 1)
+  (clear-depth 1d0)
+  (clear-stencil 1)
+  (hint :perspective-correction-hint :nicest)
   (load-identity)
   (if (< rot 360)
       (incf rot)
       (setf rot 0))
   (rotate rot 0 0 1)
-  (let* ((x 1))
-    (with-primitive :lines
-      (color 1 0 0) (vertex 0 0) (vertex x 0)
-      (color 0 1 0) (vertex 0 0) (vertex 0 x)
-      (color 0 0 1) (vertex 0 0) (vertex 0 0 x)))
-  (with-pushed-matrix
-    (color 1 1 1)
-    (translate mx my mz)
-    (let* ((x .02) (m (- x)))
-      (with-primitive :lines
-	(vertex m 0) (vertex x 0)
-	(vertex 0 m) (vertex 0 x)
-	(vertex 0 0 m) (vertex 0 0 x))))
+  #+nil  (let* ((x 1))
+	   (with-primitive :lines
+	     (color 1 0 0) (vertex 0 0) (vertex x 0)
+	     (color 0 1 0) (vertex 0 0) (vertex 0 x)
+	     (color 0 0 1) (vertex 0 0) (vertex 0 0 x)))
+  #+nil  (with-pushed-matrix
+	   (color 1 1 1)
+	   (translate mx my mz)
+	   (let* ((x .02) (m (- x)))
+	     (with-primitive :lines
+	       (vertex m 0) (vertex x 0)
+	       (vertex 0 m) (vertex 0 x)
+	       (vertex 0 0 m) (vertex 0 0 x))))
+  (cull-face :back)
   (enable :cull-face)
+
+  (clear :color-buffer-bit :depth-buffer-bit :stencil-buffer-bit)
   (material :front :ambient-and-diffuse #(0.8 0.1 0.0 1.0))
   (light :light0 :position (make-array 4 :element-type 'double-float
 				       :initial-contents
@@ -440,11 +445,58 @@
 	(scale .01 .01 .01)
 	(dotimes (i 50)
 	  (draw-triangle (get-triangle i))))))
-  (material :front :ambient-and-diffuse #(0.3 0.3 0.3 1.0))
+  (material :front :ambient-and-diffuse #(0.4 0.5 0.5 1.0))
   (draw-disk (normalize (v 0d0 .3d0 1d0))
 	     (v 0d0 0d0 -2.3d0) 4d0)
-  (disable :lighting :light0 :depth-test)
-  (draw-shadow))
+  #+nil(progn  (disable :lighting :depth-test)
+	       (front-face :ccw)
+	       (color 0 1 0)
+	       (draw-shadow)
+	       (front-face :cw)
+	       (color 1 0 0)
+	       (draw-shadow)
+	       (front-face :ccw))
+  ;;(clear :stencil-buffer-bit)
+  (with-pushed-attrib
+      (:color-buffer-bit :depth-buffer-bit
+			 :enable-bit :polygon-bit
+			 :stencil-buffer-bit)
+    (enable :cull-face)
+    (disable :lighting)
+    (depth-mask 0)
+    (depth-func :lequal)
+    (enable :stencil-test)
+    (color-mask :false :true :false :false) 
+    (enable :blend)
+    (blend-func :src-alpha :one-minus-src-alpha)
+    (color 0 0 0 .3d0)
+    (stencil-func :always 1 #xff)
+    (stencil-op :keep :keep :incr)
+    (front-face :cw)
+    (draw-shadow)
+    
+    (color 0 0 0 .001d0)
+    (front-face :ccw)
+    (stencil-op :keep :keep :decr)
+    (draw-shadow)
+    
+    (front-face :ccw)
+    (color-mask :true :true :true :true)
+    (color .0 .0 .0 .9d0)
+    (enable :blend)
+    (blend-func :src-alpha :one-minus-src-alpha)
+    (stencil-func :notequal 1 #xff)
+    (stencil-op :keep :keep :keep)
+    (disable :depth-test)
+    (with-pushed-matrix
+      (load-identity)
+      (draw-disk (normalize (v 2d0 3d0 4d0))
+		 (v 0d0 0d0 0d0) 4d0)))
+  (disable :blend :stencil-test)
+  (depth-func :lequal)
+  (enable :lighting)
+  (shade-model :smooth))
+
 #+nil
 (run)
 
@@ -475,7 +527,8 @@
     (#\Esc (destroy-current-window))))
 
 (defun run ()
-  (display-window (make-instance 'fenster :mode '(:double :rgb :depth))))
+  (display-window (make-instance 'fenster
+				 :mode '(:double :rgb :depth :stencil))))
  
 #+nil
 (run)
