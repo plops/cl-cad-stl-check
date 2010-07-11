@@ -129,6 +129,8 @@
 (loop for a across *faces* and i from 0 collect
      (list (incf i) a))
 
+#.(defparameter *neighbors* nil)
+
 (defun get-connectivity ()
   #+nil (declare (values shadowed-object &optional))
   (loop for face-a across *faces* and ia from 0 do
@@ -145,14 +147,104 @@
 			    (aref (aref *neighbors* ib) j) ia))))))))
   nil)
 
+
+
+(defun face-normal (face)
+  (declare (vec-i face)
+	   (values vec &optional))
+  (let* ((a (aref *points* (vec-i-x face)))
+	 (b (aref *points* (vec-i-y face)))
+	 (c (aref *points* (vec-i-z face)))
+	 (n (cross (v- b a) (v- c a)))) ;; outward for CCW
+    (normalize n)))
+
+(defparameter *light-position* (v 12d0 13d0 20d0))
+;; get-visibility
+(defparameter *visibility*
+  (make-array 
+   (length *faces*) :element-type 'boolean
+   :initial-contents 
+   (loop for face across *faces* collect
+	(let* ((n (face-normal face))
+	       (side (v. n (normalize *light-position*))))
+	  (when (< 0 side)
+	    t)))))
+
+(defun vertex-v (vec)
+  (declare (vec vec)
+	   (values null &optional))
+  (vertex (vec-x vec) (vec-y vec) (vec-z vec))
+  nil)
+
+(defun translate-v (vec)
+  (declare (vec vec)
+	   (values null &optional))
+  (translate (vec-x vec) (vec-y vec) (vec-z vec))
+  nil)
+
+(defun normal-v (vec)
+  (declare (vec vec)
+	   (values null &optional))
+  (normal (vec-x vec) (vec-y vec) (vec-z vec))
+  nil)
+
+(defun draw-face (face)
+  (declare (vec-i face)
+	   (values null &optional))
+  (dotimes (i 3)
+    (vertex-v (aref *points* (aref face i))))
+  nil)
+
+(defun draw-edge (face i)
+  (declare (vec-i face)
+	   ((integer 0 2) i)
+	   (values null &optional))
+  (let ((i2 (mod (1+ i) 3)))
+    (vertex-v (aref *points* (aref face i)))
+    (vertex-v (aref *points* (aref face i2))))
+  nil)
+
+(defun draw-edge-quad (face i)
+  (declare (vec-i face)
+	   ((integer 0 2) i)
+	   (values null &optional))
+  (let* ((a (aref *points* (aref face i)))
+	 (b (aref *points* (aref face (mod (1+ i) 3))))
+	 (big 4d0)
+	 (c (v+ a (v* (normalize (v- a *light-position*)) big)))
+	 (d (v+ b (v* (normalize (v- b *light-position*)) big))))
+    ;; for i=1 the order has to be swapped to draw ccw
+    (loop for p in (if (eq i 1)
+		       (list a b c
+			     c b d)
+		       (list a c b
+			     c d b)) do
+	 (vertex-v p))))
+
+(defun draw-shadow ()
+  (enable :depth-test)
+  (loop for face across *faces* and k from 0 do
+       (with-primitive :triangles
+	 (when (aref *visibility* k)
+	   (dotimes (i 3)
+	    (unless (aref *visibility* (aref (aref *neighbors* k) i))
+	      (draw-edge-quad face i)))))))
+
+#+nil
+(make-unit-sphere 3 1)
+#+nil
+(make-unit-sphere 32 16)
 ;; for each edge of each face store the index to the neighboring face
 (defparameter *neighbors*
   (make-array (length *faces*)
 	      :element-type 'vec-i ;; using :initial-element caused UGLY bug
 	      :initial-contents (loop for i below (length *faces*) collect
 				     (make-vec-i :x -1 :y -1 :z -1))))
+
 #+nil
 (get-connectivity)
+#+nil
+(run)
 
 #+nil
 (defparameter s (set-connectivity (make-object)))
@@ -224,21 +316,6 @@
 #+nil
 (make-unit-sphere 3 1)
 
-#+nil
-(shadowed-object-faces (make-object))
-
-#+nil
-(defparameter s (make-object))
-
-(defun face-normal (face)
-  (declare (vec-i face)
-	   (values vec &optional))
-  (let* ((a (aref *points* (vec-i-x face)))
-	 (b (aref *points* (vec-i-y face)))
-	 (c (aref *points* (vec-i-z face)))
-	 (n (cross (v- b a) (v- c a)))) ;; outward for CCW
-    (normalize n)))
-
 ;; draw obj.vertices[obj.faces[n].vertex-indices]
 (defun draw-global-object ()
   (declare (values null &optional))
@@ -250,10 +327,7 @@
 	      (normal (vec-x n) (vec-y n) (vec-z n))
 	      (vertex (vec-x p) (vec-y p) (vec-z p)))))))
   nil)
-#+nil
-(make-unit-sphere 32 16)
-#+nil
-(run)
+
 
 (defun make-object ()
   (let* ((o (make-shadowed-object))
@@ -277,16 +351,56 @@
   (matrix-mode :projection)
   (load-identity)
   #+nil (ortho 0 (width w) (height w) 0 -1 1)
-  (glu:perspective 70 (/ (width w) (height w)) .01 10)
-  (glu:look-at 2 3 1
-               0 0 0
+  (glu:perspective 70 (/ (width w) (height w)) .01 100)
+  (glu:look-at 2 3 4
+               0 0 -2
                0 0 1)
   (matrix-mode :modelview)
   (load-identity))
  
 (defmethod display-window :before ((w fenster))
   (set-3d-view w))
+
+(defvar circle-points
+  (let* ((n 37)
+	 (ps (make-array (+ n 2) :element-type 'vec
+			 :initial-element (v))))
+    (declare (fixnum n)
+	     ((simple-array vec 1) ps))
+    (setf (aref ps 0) (v))
+    (dotimes (i n)
+      (let ((arg (* 2d0 pi i (/ 1d0 n))))
+	(declare ((double-float 0d0 6.3d0) arg))
+	(setf (aref ps (1+ i)) (v (cos arg) (sin arg)))))
+    (setf (aref ps (1+ n)) (aref ps 1))
+    ps))
+(declaim (type (simple-array vec 1) circle-points))
+(defun draw-circle ()
+  "Draw circle with radius 1."
+  (dotimes (i (length circle-points))
+    (vertex-v (aref circle-points i)))
+  nil)
  
+
+(defun draw-disk (normal center radius)
+  (declare (vec normal center)
+	   (double-float radius)
+	   (values null &optional))
+  (unless (< (abs (- (norm normal) 1d0)) 1d-5)
+    (error "normal should have length 1."))
+  (with-pushed-matrix
+     (translate-v center)
+     (let* ((theta (acos (vec-z normal)))
+	    (phi (atan (aref normal 1) (aref normal 0))))
+       (rotate (* (/ 180d0 pi) phi) 0 0 1)
+       (rotate (* (/ 180d0 pi) theta) 0 1 0)
+       (scale radius radius 1))
+     (color 1 1 1)
+     (with-primitive :triangle-fan
+       (normal-v normal)
+       (draw-circle))
+     nil))
+
 (defparameter rot 0)
 (defun draw (mx my mz)
   (load-identity)
@@ -309,10 +423,15 @@
 	(vertex 0 0 m) (vertex 0 0 x))))
   (enable :cull-face)
   (material :front :ambient-and-diffuse #(0.8 0.1 0.0 1.0))
-  (light :light0 :position #(10d0 10d0 10d0 0d0))
+  (light :light0 :position (make-array 4 :element-type 'double-float
+				       :initial-contents
+				       (list 
+					(vec-x *light-position*)
+					(vec-y *light-position*)
+					(vec-z *light-position*)
+					0d0)))
   (enable :lighting :light0 :depth-test)
   (draw-global-object)
-  
   #+nil 
   (with-pushed-matrix
     (scale .02 .02 .02)
@@ -321,7 +440,11 @@
 	(scale .01 .01 .01)
 	(dotimes (i 50)
 	  (draw-triangle (get-triangle i))))))
-  (disable :lighting :light0))
+  (material :front :ambient-and-diffuse #(0.3 0.3 0.3 1.0))
+  (draw-disk (normalize (v 0d0 .3d0 1d0))
+	     (v 0d0 0d0 -2.3d0) 4d0)
+  (disable :lighting :light0 :depth-test)
+  (draw-shadow))
 #+nil
 (run)
 
