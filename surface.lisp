@@ -158,17 +158,8 @@
 	 (n (cross (v- b a) (v- c a)))) ;; outward for CCW
     (normalize n)))
 
-(defparameter *light-position* (v 12d0 13d0 20d0))
-;; get-visibility
-(defparameter *visibility*
-  (make-array 
-   (length *faces*) :element-type 'boolean
-   :initial-contents 
-   (loop for face across *faces* collect
-	(let* ((n (face-normal face))
-	       (side (v. n (normalize *light-position*))))
-	  (when (< 0 side)
-	    t)))))
+(defparameter *light-position* nil)
+(defparameter *visibility* nil)
 
 (defun vertex-v (vec)
   (declare (vec vec)
@@ -239,9 +230,20 @@
 	      :element-type 'vec-i ;; using :initial-element caused UGLY bug
 	      :initial-contents (loop for i below (length *faces*) collect
 				     (make-vec-i :x -1 :y -1 :z -1))))
-
 #+nil
 (get-connectivity)
+(defparameter *light-position* (v 12d0 13d0 20d0))
+;; get-visibility
+(defparameter *visibility*
+  (make-array 
+   (length *faces*) :element-type 'boolean
+   :initial-contents 
+   (loop for face across *faces* collect
+	(let* ((n (face-normal face))
+	       (side (v. n (normalize *light-position*))))
+	  (when (< 0 side)
+	    t)))))
+
 #+nil
 (run)
 
@@ -445,9 +447,14 @@
 	(scale .01 .01 .01)
 	(dotimes (i 50)
 	  (draw-triangle (get-triangle i))))))
+
   (material :front :ambient-and-diffuse #(0.4 0.5 0.5 1.0))
-  (draw-disk (normalize (v 0d0 .3d0 1d0))
+  (draw-disk (normalize (v 0d0 0d0 1d0))
 	     (v 0d0 0d0 -2.3d0) 4d0)
+  (material :front :ambient-and-diffuse #(0.7 0.6 0.5 1d0))
+
+  (draw-disk (normalize (v 0d0 1d0 1d0))
+	     (v .3d0 -1.2d0 -1.3d0) 1d0)
   #+nil(progn  (disable :lighting :depth-test)
 	       (front-face :ccw)
 	       (color 0 1 0)
@@ -469,13 +476,13 @@
     (color-mask :false :true :false :false) 
     (enable :blend)
     (blend-func :src-alpha :one-minus-src-alpha)
-    (color 0 0 0 .3d0)
+    (color 0 0 0 .0d0)
     (stencil-func :always 1 #xff)
     (stencil-op :keep :keep :incr)
     (front-face :cw)
     (draw-shadow)
     
-    (color 0 0 0 .001d0)
+    (color 0 0 0 .0d0)
     (front-face :ccw)
     (stencil-op :keep :keep :decr)
     (draw-shadow)
