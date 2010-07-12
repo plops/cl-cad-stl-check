@@ -11,74 +11,19 @@
  
 (in-package :g)
  
-;; cat points |tr ']' '\n'|cut -d " " -f 3,4,5|tr ',' ' '|awk '{print "(" $N")"}' > points2.lisp
-;; cat triangles  | tr ']' '\n' |grep -v ^,$|tr ',' ' '|tr '[' ' '|awk '{print "(" $N ")"}' >> triangles2.lisp
+;; shadow using stencil buffer
+;; code along the lines of nehe 27 tutorial
 
-#.(load "points.lisp")
-#.(load "triangles.lisp")
 
-;; store the data in simple arrays
-#.(defparameter *points*
-  (let* ((n (length points))
-	 (s (make-array n
-		       :element-type 'vec
-		       :initial-element (v))))
-    (dotimes (i n)
-      (let ((v (elt points i)))
-       (setf (aref s i) (v (coerce (first v) 'double-float)
-			   (coerce (second v) 'double-float)
-			   (coerce (third v) 'double-float)))))
-    s))
+(defmacro do-global-edges ((i a b face) &body body)
+  `(dotimes (,i 3)
+     (let ((,a (aref ,face ,i))
+	   (,b (aref ,face (mod (1+ ,i) 3))))
+       ,@body)))
 
-(declaim (type (simple-array vec 1) *points*))
-
-#.(defparameter *faces*
-    (let* ((n (length triangles))
-	   (np1 (1- (length *points*)))
-	   (s (make-array n
-			  :element-type 'vec-i
-			:initial-element (make-vec-i))))
-      (dotimes (i n)
-	(let ((v (elt triangles i)))
-	  (destructuring-bind (x y z)
-	      v
-	    (unless (and (<= 0 x np1)
-			 (<= 0 y np1)
-			 (<= 0 z np1))
-	      (error "face ~d=~a indexes non-existant point." i v))
-	    (setf (aref s i) (make-vec-i :x x :y y :z z)))))
-      s))
-
-(declaim (type (simple-array vec-i 1) *faces*))
-
-(defstruct plane 
-  (normal (v 1d0) :type vec)
-  (distance 0d0 :type double-float))
-
-(defstruct face
-  (vertex-indices (make-vec-i) :type vec-i)
-  (normals (make-array 3 :element-type 'vec :initial-contents (v))
-	   :type (simple-array vec (3)))
-  (plane (make-plane) :type plane)
-  (neighbour-indices (make-vec-i :x -1 :y -1 :z -1) :type vec-i)
-  (visible nil :type boolean))
-
-(defstruct shadowed-object
-  (vertices *points* :type (simple-array vec 1))
-  (faces (make-array 0 :element-type 'face
-		     :initial-element (make-face)) 
-	 :type (simple-array face 1)))
-
-(defmacro do-edges ((i a b face) &body body)
-  (let ((vs (gensym "vertex-indices")))
-    `(with-slots ((,vs vertex-indices))
-	 ,face
-       (declare (type face ,face))
-       (dotimes (,i 3)
-	 (let ((,a (aref ,vs ,i))
-	       (,b (aref ,vs (mod (1+ ,i) 3))))
-	   ,@body)))))
-
+(defparameter *neighbors* nil)
+(defparameter *points* nil)
+(defparameter *faces* nil)
 
 ;; pseudocode to find neighbours:
 ;; for each face (A) in the object
@@ -90,46 +35,6 @@
 ;;        then they are neighbouring each other on that edge
 ;;        set the neighbour property for each face A and B, 
 ;;        then move onto next edge in A
-
-(defun set-connectivity (obj)
-  (declare (shadowed-object obj)
-	   (values shadowed-object &optional))
-  (format t "~a~%" '(los gehts))
-  (with-slots (faces)
-      obj
-   (let ((n (length faces)))
-     (dotimes (ia n) ;; go through every triangle faceA
-       (format t "~a~%" (list 'ia ia 'of n))
-       (let ((face-a (aref faces ia)))
-	 (with-slots ((ns-a neighbour-indices))
-	     face-a
-	   (do-edges (edge-a a b face-a) ;; check each of the three edges
-	     (when (eq -1 (aref ns-a edge-a)) ;; we don't know any neighbor
-	       (dotimes (ib n) ;; go through all other triangles as faceB 
-		 (format t "~a~%" (list 'ib ib))
-		 (unless (eq ib ia)
-		   (let ((face-b (aref faces ib)))
-		     (do-edges (edge-b c d face-b) ;; iterate over all edges in B
-		       (when (or (and (eq a c) (eq b d)) ;; two points of the edge
-				 (and (eq a d) (eq b c)));; are shared by A and B
-			 (format t "~a~%" (list 'found 'ia ia 'ib ib 'a a 'b b))
-			 (setf (aref ns-a edge-a) ib
-			       (aref (face-neighbour-indices face-b) edge-b) ia)
-			 (go nextA))))))))))
-       nextA)))
-  obj)
-
-(defmacro do-global-edges ((i a b face) &body body)
-  `(dotimes (,i 3)
-     (let ((,a (aref ,face ,i))
-	   (,b (aref ,face (mod (1+ ,i) 3))))
-       ,@body)))
-
-#+nil
-(loop for a across *faces* and i from 0 collect
-     (list (incf i) a))
-
-#.(defparameter *neighbors* nil)
 
 (defun get-connectivity ()
   #+nil (declare (values shadowed-object &optional))
@@ -146,8 +51,6 @@
 		      (setf (aref (aref *neighbors* ia) i) ib
 			    (aref (aref *neighbors* ib) j) ia))))))))
   nil)
-
-
 
 (defun face-normal (face)
   (declare (vec-i face)
@@ -220,35 +123,6 @@
 	    (unless (aref *visibility* (aref (aref *neighbors* k) i))
 	      (draw-edge-quad face i)))))))
 
-#+nil
-(make-unit-sphere 3 1)
-#+nil
-(make-unit-sphere 32 16)
-;; for each edge of each face store the index to the neighboring face
-(defparameter *neighbors*
-  (make-array (length *faces*)
-	      :element-type 'vec-i ;; using :initial-element caused UGLY bug
-	      :initial-contents (loop for i below (length *faces*) collect
-				     (make-vec-i :x -1 :y -1 :z -1))))
-#+nil
-(get-connectivity)
-(defparameter *light-position* (v 12d0 13d0 20d0))
-;; get-visibility
-(defparameter *visibility*
-  (make-array 
-   (length *faces*) :element-type 'boolean
-   :initial-contents 
-   (loop for face across *faces* collect
-	(let* ((n (face-normal face))
-	       (side (v. n (normalize *light-position*))))
-	  (when (< 0 side)
-	    t)))))
-
-#+nil
-(run)
-
-#+nil
-(defparameter s (set-connectivity (make-object)))
 ;; u=3 v=1 is double tetraeder
 (defun make-unit-sphere (u v)
   (declare (fixnum u v))
@@ -317,6 +191,32 @@
 #+nil
 (make-unit-sphere 3 1)
 
+;; rerun the following commands to change the object or the light position
+
+(make-unit-sphere 32 16)
+
+;; for each edge of each face store the index to the neighboring face
+
+(defparameter *neighbors*
+  (make-array (length *faces*)
+	      :element-type 'vec-i ;; using :initial-element caused UGLY bug
+	      :initial-contents (loop for i below (length *faces*) collect
+				     (make-vec-i :x -1 :y -1 :z -1))))
+(get-connectivity)
+
+(defparameter *light-position* (v 12d0 13d0 20d0))
+;; get-visibility
+
+(defparameter *visibility*
+  (make-array 
+   (length *faces*) :element-type 'boolean
+   :initial-contents 
+   (loop for face across *faces* collect
+	(let* ((n (face-normal face))
+	       (side (v. n (normalize *light-position*))))
+	  (when (< 0 side)
+	    t)))))
+
 ;; draw obj.vertices[obj.faces[n].vertex-indices]
 (defun draw-global-object ()
   (declare (values null &optional))
@@ -329,17 +229,6 @@
 	      (vertex (vec-x p) (vec-y p) (vec-z p)))))))
   nil)
 
-
-(defun make-object ()
-  (let* ((o (make-shadowed-object))
-	 (n (length *faces*))
-	 (m (make-array n
-			:element-type 'face
-			:initial-element (make-face))))
-    (dotimes (i n)
-      (setf (face-vertex-indices (aref m i)) (aref *faces* i)))
-    (setf (shadowed-object-faces o) m)
-    o))
 
 (defclass fenster (window)
   ((cursor-position :accessor cursor-position 
@@ -439,14 +328,6 @@
 					0d0)))
   (enable :lighting :light0 :depth-test)
   (draw-global-object)
-  #+nil 
-  (with-pushed-matrix
-    (scale .02 .02 .02)
-    (with-primitive :triangles
-      (with-pushed-matrix
-	(scale .01 .01 .01)
-	(dotimes (i 50)
-	  (draw-triangle (get-triangle i))))))
 
   (material :front :ambient-and-diffuse #(0.4 0.5 0.5 1.0))
   (draw-disk (normalize (v 0d0 0d0 1d0))
@@ -455,15 +336,7 @@
 
   (draw-disk (normalize (v 0d0 1d0 1d0))
 	     (v .3d0 -1.2d0 -1.3d0) 1d0)
-  #+nil(progn  (disable :lighting :depth-test)
-	       (front-face :ccw)
-	       (color 0 1 0)
-	       (draw-shadow)
-	       (front-face :cw)
-	       (color 1 0 0)
-	       (draw-shadow)
-	       (front-face :ccw))
-  ;;(clear :stencil-buffer-bit)
+ 
   (with-pushed-attrib
       (:color-buffer-bit :depth-buffer-bit
 			 :enable-bit :polygon-bit
@@ -503,9 +376,6 @@
   (depth-func :lequal)
   (enable :lighting)
   (shade-model :smooth))
-
-#+nil
-(run)
 
 (defmethod display ((w fenster))
   (clear :color-buffer-bit :depth-buffer-bit)
